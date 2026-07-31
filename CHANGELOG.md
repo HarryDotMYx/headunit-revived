@@ -54,6 +54,7 @@
 - Fixed the auto-connect priority list's drag-and-drop breaking or flickering mid-drag
 - Various smaller fixes: a navigation ETA data-type mismatch, a couple of latent crash risks, and a USB compatibility-mode setting not applying during locked boot
 - Fixed: on some head units (especially Chinese MediaTek units), plugging in USB could silently fail to auto-detect - the system doesn't always reliably notify the app when the phone re-enumerates in accessory mode after the switch; the app now proactively ensures its background service is running before switching, instead of depending on that notification
+- Fixed: a device whose H.265 hardware decoder is present but broken could get stuck on "Android Auto is starting" forever with no way to recover; the app now automatically falls back to H.264 and reconnects if no video arrives after 20 seconds
 
 ### v.3.2.0-beta2
 - Don't grab audio focus on connect in dynamic mode, thanks to @bnayahu

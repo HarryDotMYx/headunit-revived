@@ -111,6 +111,11 @@ class AapProjectionActivity : SurfaceActivity(), IProjectionView.Callbacks, Vide
     private var isKeyEventReceiverRegistered = false
     private var isSettingsReceiverRegistered = false
 
+    // When the current "waiting for the first video frame" wait began — see
+    // videoWatchdogRunnable and NO_FIRST_FRAME_CODEC_FALLBACK_MS. Reset at each fresh start
+    // of that wait (a new HandshakeComplete, or resuming into a session already waiting).
+    private var videoWaitStartedAtMs: Long = 0L
+
     private val videoWatchdogRunnable = object : Runnable {
         override fun run() {
             val loadingOverlay = findViewById<View>(R.id.loading_overlay)
@@ -122,7 +127,28 @@ class AapProjectionActivity : SurfaceActivity(), IProjectionView.Callbacks, Vide
                     return
                 }
 
-                AppLog.w("Watchdog: No video received yet. Requesting Keyframe (Unsolicited Focus)...")
+                // [FIX] "Stuck on Android is starting" — some devices report an H.265 decoder
+                // in MediaCodecList but it doesn't actually work for this app's stream (a known
+                // device/firmware quirk; see the "Known Issues" note in README.md). Previously
+                // this loop just kept requesting a keyframe every 1.5s forever — which cannot
+                // help if the decoder itself never produces output, so a bad codec choice meant
+                // an indefinite hang with no recovery. After a generous timeout with zero frames
+                // ever rendered, fall back to H.264 (the safest, most broadly-supported choice)
+                // and restart the connection so the new preference is renegotiated.
+                if (videoWaitStartedAtMs == 0L) {
+                    videoWaitStartedAtMs = SystemClock.elapsedRealtime()
+                }
+                val waitedMs = SystemClock.elapsedRealtime() - videoWaitStartedAtMs
+                if (waitedMs >= NO_FIRST_FRAME_CODEC_FALLBACK_MS && settings.videoCodec != "H.264") {
+                    AppLog.e("Watchdog: No video after ${waitedMs}ms with videoCodec='${settings.videoCodec}'. Falling back to H.264 and reconnecting.")
+                    settings.videoCodec = "H.264"
+                    Toast.makeText(this@AapProjectionActivity, R.string.video_codec_fallback_toast, Toast.LENGTH_LONG).show()
+                    commManager.disconnect()
+                    finish()
+                    return
+                }
+
+                AppLog.w("Watchdog: No video received yet (${waitedMs}ms). Requesting Keyframe (Unsolicited Focus)...")
                 commManager.send(VideoFocusEvent(gain = true, unsolicited = true))
                 watchdogHandler.postDelayed(this, 1500)
             }
@@ -473,6 +499,7 @@ class AapProjectionActivity : SurfaceActivity(), IProjectionView.Callbacks, Vide
 
                             // Restart the video watchdog so it can request keyframes for the new session
                             watchdogHandler.removeCallbacks(videoWatchdogRunnable)
+                            videoWaitStartedAtMs = 0L // fresh session — restart the no-first-frame countdown
                             watchdogHandler.postDelayed(videoWatchdogRunnable, 1000)
 
                             // Lock the resolution so that orientation changes don't cause re-negotiation
@@ -1371,6 +1398,10 @@ class AapProjectionActivity : SurfaceActivity(), IProjectionView.Callbacks, Vide
     companion object {
         const val EXTRA_FOCUS = "focus"
         @Volatile var isForeground = false
+
+        /** How long to wait for the first video frame before assuming the configured codec is
+         *  the problem and falling back to H.264. See videoWatchdogRunnable. */
+        private const val NO_FIRST_FRAME_CODEC_FALLBACK_MS = 20_000L
 
         /**
          * Optional one-shot override for the loading-screen status text. Set by

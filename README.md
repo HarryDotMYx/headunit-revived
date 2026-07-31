@@ -58,7 +58,6 @@ adb shell am start -a android.intent.action.VIEW -d "headunit://connect?ip=192.1
 - **Wireless Connection Drops:** If the connection drops frequently, disable **"WiFi Assistant"** or **"Switch between networks"** in your phone's WiFi settings to prevent it from killing the connection due to "no internet." Check battery saving options.
 - **Self-mode on Android 10 (Q) and below:** Google has disabled the automatic wireless projection startup for Android 10 and below in Android Auto versions 16.4 and higher. While Self-mode still works on newer Android versions, it is normally impossible to trigger projection on Android 10 and below directly with recent Google app updates. **Workaround:** You can still use Self-mode on these devices by starting the built-in Android Auto Headunit Server and connecting via Wi-Fi mode (loopback). See the [Troubleshooting Guide](https://github.com/andreknieriem/headunit-revived/wiki/Troubleshooting#self-mode-on-android-10-q-and-below) for step-by-step instructions.
 - **WiFi-Direct needs long to connect:** A user finds that this is related to Google Assistant instead of Gemini for AA. If you use Gemini on newer AA versions it just runs smooth again. No idea why this happens.
-- **Stuck on Android is starting** Check your video codec in the settings and set it to h264 if you have a device which does not support h265. Some devices have a broken h265 decoder and this will cause the app to stuck on "Android is starting" and never start the projection.
 
 ## Planned
 - more customization options for the UI and the app itself
@@ -119,6 +118,7 @@ adb shell am start -a android.intent.action.VIEW -d "headunit://connect?ip=192.1
 - Fixed the auto-connect priority list's drag-and-drop breaking or flickering mid-drag
 - Various smaller fixes: a navigation ETA data-type mismatch, a couple of latent crash risks, and a USB compatibility-mode setting not applying during locked boot
 - Fixed: on some head units (especially Chinese MediaTek units), plugging in USB could silently fail to auto-detect - the system doesn't always reliably notify the app when the phone re-enumerates in accessory mode after the switch; the app now proactively ensures its background service is running before switching, instead of depending on that notification
+- Fixed: a device whose H.265 hardware decoder is present but broken could get stuck on "Android Auto is starting" forever with no way to recover; the app now automatically falls back to H.264 and reconnects if no video arrives after 20 seconds
 
 ### v.3.2.0-beta2
 - Don't grab audio focus on connect in dynamic mode, thanks to @bnayahu
