@@ -69,6 +69,8 @@
 - Add car keys support for FYT headunits, thanks to @MrEAlderson
 - Added Option to flip projection horizontal for Headup-Displays
 - Recover automatically from post-first-frame video display stalls, thanks to @andrecuellar
+- Settings and Onboarding Wizard redesign for better usability, thanks to @andrecuellar
+- Fixing mulitiple WiFi-Direct and Native AA connection issues, thanks to @o-jcardenass, @andrecuellar and @notathf
 
 ### v.3.1.1
 - Reduce pressure on sensor events like night and gps and start/stop these events in onConnected, onDisconnect and onDestroy
