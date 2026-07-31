@@ -1,0 +1,61 @@
+package com.andrerinas.headunitrevived.connection
+
+import android.net.wifi.p2p.WifiP2pManager
+import android.os.Build
+import androidx.annotation.RequiresApi
+import com.andrerinas.headunitrevived.utils.AppLog
+
+/**
+ * Handles WiFi P2P API calls that require higher API levels to avoid NoClassDefFoundError
+ * on older Android versions during class loading of [WifiDirectManager].
+ */
+object WifiDirectCompat {
+
+    /**
+     * Safely calls [WifiP2pManager.requestDeviceInfo] if running on API 29+.
+     */
+    fun requestDeviceInfo(
+        manager: WifiP2pManager?,
+        channel: WifiP2pManager.Channel?,
+        onDeviceAvailable: (address: String) -> Unit
+    ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && manager != null && channel != null) {
+            Api29Impl.requestDeviceInfo(manager, channel, onDeviceAvailable)
+        }
+    }
+
+    fun getGroupFrequency(group: android.net.wifi.p2p.WifiP2pGroup?): Int {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && group != null) {
+            return Api29Impl.getGroupFrequency(group)
+        }
+        return 0
+    }
+
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private object Api29Impl {
+        fun requestDeviceInfo(
+            manager: WifiP2pManager,
+            channel: WifiP2pManager.Channel,
+            onDeviceAvailable: (address: String) -> Unit
+        ) {
+            try {
+                // [FIX] Always invoke the callback, even when the framework hands back a null
+                // device (seen in the field with location services off / permission not yet
+                // granted). The previous device?.let{} swallowed the null case entirely, so
+                // callers chaining requestGroupInfo() off this callback (WifiDirectManager's
+                // onConnectionInfoAvailable, on API 29+) never ran it — stalling the whole
+                // group-owner flow indefinitely with no error and no retry.
+                manager.requestDeviceInfo(channel) { device ->
+                    onDeviceAvailable(device?.deviceAddress ?: "00:00:00:00:00:00")
+                }
+            } catch (e: Exception) {
+                AppLog.w("WifiDirectCompat: requestDeviceInfo failed: ${e.message}")
+            }
+        }
+
+        fun getGroupFrequency(group: android.net.wifi.p2p.WifiP2pGroup): Int {
+            return group.frequency
+        }
+    }
+}
