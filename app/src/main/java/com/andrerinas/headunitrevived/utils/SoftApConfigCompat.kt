@@ -42,12 +42,21 @@ object SoftApConfigCompat {
             val builderClass = Class.forName("android.net.wifi.SoftApConfiguration\$Builder")
             val builder = builderClass.getDeclaredConstructor().newInstance()
 
-            // Retrieve SSID from Settings (fallback to default)
-            val ssid = Settings(context).autoStartWifiSsid.ifEmpty { "HeadunitHotspot" }
+            // [FIX] Was reading autoStartWifiSsid — the *trigger* SSID this device watches for
+            // to auto-start a connection to a phone's hotspot — instead of hotspotSsid, the
+            // dedicated (until now unused) setting for this device's own hotspot name. Using the
+            // trigger SSID here meant enabling the headunit's hotspot could rename it to whatever
+            // phone hotspot name the user had configured for auto-start, an unrelated setting.
+            val ssid = Settings(context).hotspotSsid.ifEmpty { "HeadunitHotspot" }
             builderClass.getMethod("setSsid", String::class.java).invoke(builder, ssid)
 
-            // Retrieve password from Settings (fallback to default)
-            val password = Settings(context).hotspotPassword.ifEmpty { "12345678" }
+            // [FIX] Settings.hotspotPassword's getter already self-heals: on an empty stored
+            // value it generates and persists a SecureRandom password, so it can never actually
+            // return "". The ".ifEmpty { "12345678" }" fallback here was dead code that also
+            // happened to be the last hardcoded WPA2 passphrase left in the app — removed so
+            // the "never a predictable default" invariant lives in exactly one place (the
+            // getter) instead of silently becoming live again if that getter is ever refactored.
+            val password = Settings(context).hotspotPassword
             // 0 = WPA2_PSK as per SoftApConfiguration constants
             builderClass.getMethod("setPassphrase", String::class.java, Int::class.javaPrimitiveType)
                 .invoke(builder, password, 1) // 1 = WPA2_PSK

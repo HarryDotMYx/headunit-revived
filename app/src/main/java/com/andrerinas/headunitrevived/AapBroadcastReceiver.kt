@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.Intent.FLAG_ACTIVITY_NEW_TASK
 import android.content.IntentFilter
+import android.location.Location
 import android.view.KeyEvent
 import com.andrerinas.headunitrevived.aap.AapProjectionActivity
 import com.andrerinas.headunitrevived.aap.protocol.messages.LocationUpdateEvent
@@ -40,8 +41,13 @@ class AapBroadcastReceiver : BroadcastReceiver() {
             // malformed/missing extra instead of just skipping the update.
             val location = LocationUpdateIntent.extractLocation(intent) ?: return
 
-            // Feed the single source of truth for geofence / night-by-area evaluation.
-            com.andrerinas.headunitrevived.location.LocationHolder.update(location)
+            // [FIX] LocationHolder.update() used to be given this exact `location` reference,
+            // which the fakeSpeed branch right below then mutates in place — so anything reading
+            // LocationHolder later would see whatever speed was last poked into it here, not the
+            // real reported speed. Currently harmless since nothing reads speed off the holder,
+            // but feed it a defensive copy so the holder's contents can never depend on what this
+            // function happens to do to its own local variable afterwards.
+            com.andrerinas.headunitrevived.location.LocationHolder.update(Location(location))
 
             // Apply Fake Speed if enabled
             if (component.settings.fakeSpeed) {

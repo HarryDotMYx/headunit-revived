@@ -31,12 +31,22 @@ class RemoteControlReceiver : BroadcastReceiver() {
         AppLog.i("RemoteControlReceiver received: $action")
 
         // Broadcast for UI debugging (KeymapFragment)
-        val debugIntent = Intent("com.andrerinas.headunitrevived.DEBUG_KEY").apply {
-            putExtra("action", action)
-            intent.extras?.let { putExtras(it) }
-            setPackage(context.packageName)
+        // [FIX] This receiver is exported with unprotected actions, so intent.extras can carry
+        // a Parcelable extra of a class that doesn't exist in our classloader — putExtras()
+        // forces an eager unparcel and throws BadParcelableException on API <= 33, uncaught,
+        // crashing this process (and the live AA session with it) from a zero-permission app.
+        // This is a best-effort debug broadcast; skip it on failure rather than let it take
+        // down onReceive.
+        try {
+            val debugIntent = Intent("com.andrerinas.headunitrevived.DEBUG_KEY").apply {
+                putExtra("action", action)
+                intent.extras?.let { putExtras(it) }
+                setPackage(context.packageName)
+            }
+            context.sendBroadcast(debugIntent)
+        } catch (e: Exception) {
+            AppLog.w("RemoteControlReceiver: Failed to relay debug broadcast: ${e.message}")
         }
-        context.sendBroadcast(debugIntent)
 
         if (Intent.ACTION_MEDIA_BUTTON == action) {
             val event = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
@@ -64,13 +74,17 @@ class RemoteControlReceiver : BroadcastReceiver() {
 
             // Broadcast command for UI debug (if not already handled by ACTION_MEDIA_BUTTON block)
             if (action != Intent.ACTION_MEDIA_BUTTON) {
-                val debugIntent = Intent("com.andrerinas.headunitrevived.DEBUG_KEY").apply {
-                    putExtra("action", action)
-                    putExtra("command", command)
-                    intent.extras?.let { putExtras(it) }
-                    setPackage(context.packageName)
+                try {
+                    val debugIntent = Intent("com.andrerinas.headunitrevived.DEBUG_KEY").apply {
+                        putExtra("action", action)
+                        putExtra("command", command)
+                        intent.extras?.let { putExtras(it) }
+                        setPackage(context.packageName)
+                    }
+                    context.sendBroadcast(debugIntent)
+                } catch (e: Exception) {
+                    AppLog.w("RemoteControlReceiver: Failed to relay debug broadcast: ${e.message}")
                 }
-                context.sendBroadcast(debugIntent)
             }
 
             val commManager = App.provide(context).commManager

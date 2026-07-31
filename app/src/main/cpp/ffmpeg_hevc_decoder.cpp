@@ -198,6 +198,16 @@ private:
         if (rgbaBuffer != nullptr) {
             av_freep(&rgbaBuffer);
         }
+        // [FIX] rgbaWidth/rgbaHeight used to only be updated on full success at the bottom of
+        // this function. If av_malloc or av_image_fill_arrays below failed, they were left
+        // pointing at the *previous* successful size while rgbaBuffer was now null (or, on an
+        // av_image_fill_arrays failure specifically, non-null but not correctly laid out for
+        // that size) — a later call requesting that previous size would then hit the early
+        // cache-hit check above and report "ready" against a buffer that either doesn't exist or
+        // isn't actually sized/laid out for it, risking an out-of-bounds sws_scale write.
+        // Invalidate the cache now so any failure below leaves it correctly cleared.
+        rgbaWidth = 0;
+        rgbaHeight = 0;
 
         const int bufferSize = av_image_get_buffer_size(AV_PIX_FMT_RGBA, width, height, 1);
         if (bufferSize <= 0) {
@@ -381,6 +391,11 @@ private:
         if (yuvBuffer != nullptr) {
             av_freep(&yuvBuffer);
         }
+        // [FIX] see the identical fix in ensureRgbaBuffer() above — invalidate the cache before
+        // attempting reallocation so any failure below (av_malloc / av_image_fill_arrays) can't
+        // leave yuvWidth/yuvHeight describing a buffer that no longer matches yuvBuffer.
+        yuvWidth = 0;
+        yuvHeight = 0;
         if (yuvFrame == nullptr) {
             yuvFrame = av_frame_alloc();
             if (yuvFrame == nullptr) {

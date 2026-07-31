@@ -64,10 +64,26 @@ class CarFYTReceiver : CarKeyReceiver {
         private val PACKAGE_NAME = "com.syu.ms"
         private val CLASS_NAME = "app.ToolkitService"
 
-        private var handler: Handler? = null
-        private var toolkit: RemoteToolkit? = null
+        // [FIX] connect()/attemptConnect() run on the "ConnectionThread" HandlerThread while
+        // disconnect() can be called from another thread (e.g. main) and nulls handler/toolkit
+        // directly. Without @Volatile, attemptConnect() running concurrently on the other thread
+        // isn't guaranteed to observe that write promptly, and worse, disconnect() nulling
+        // `handler` in the gap between attemptConnect()'s null-check and its `handler!!.postDelayed`
+        // use below could NPE-crash the process. Made volatile and attemptConnect() now snapshots
+        // handler into a local val instead of re-reading the field with `!!`.
+        @Volatile private var handler: Handler? = null
+        @Volatile private var toolkit: RemoteToolkit? = null
         private val modules = HashMap<Int, RemoteModule>()
-        private var isBinding = false
+        @Volatile private var isBinding = false
+
+        // [FIX] observe() registers an AAPCallback with the remote FYT ToolkitService via
+        // module.register(callback, code, 1) but nothing ever called the matching unregister
+        // (module.register(callback, code, 0)). Every onServiceConnected (including automatic
+        // rebinds after the FYT service restarts mid-drive) called observe() again and registered
+        // a brand new callback on top of the old one, so a single steering-wheel press could fire
+        // multiple stale callbacks at once — key events duplicating/multiplying across
+        // connect/disconnect cycles. Track what's been registered so disconnect() can undo it.
+        private val registeredObservations = mutableListOf<Triple<RemoteModule, ModuleCallback.Stub, Int>>()
 
         fun connect() {
             if (this.handler != null)
@@ -84,7 +100,8 @@ class CarFYTReceiver : CarKeyReceiver {
         }
 
         private fun attemptConnect() {
-            if (this.handler == null || this.toolkit != null || isBinding)
+            val currentHandler = this.handler ?: return
+            if (this.toolkit != null || isBinding)
                 return;
 
             val intent = Intent()
@@ -93,7 +110,7 @@ class CarFYTReceiver : CarKeyReceiver {
             if (context.bindService(intent, this, Context.BIND_AUTO_CREATE)) {
                 isBinding = true
             } else {
-                handler!!.postDelayed(this::attemptConnect, 2000)
+                currentHandler.postDelayed(this::attemptConnect, 2000)
             }
         }
 
@@ -101,11 +118,17 @@ class CarFYTReceiver : CarKeyReceiver {
             if (this.handler == null)
                 return
 
-            /*if (this.module != null) {
-                // stop receiving updates
-                module!!.cmd(2, ints = intArrayOf(0))
-                //module!!.cmd(4)
-            }*/
+            // [FIX] see registeredObservations declaration — tell the remote service to stop
+            // calling back into every callback we registered before tearing down the connection.
+            for ((module, callback, code) in registeredObservations) {
+                try {
+                    module.register(callback, code, 0)
+                } catch (e: Exception) {
+                    // Remote service may already be dead (DeadObjectException) — nothing to
+                    // clean up on its side in that case, and there's no local state to leak.
+                }
+            }
+            registeredObservations.clear()
 
             this.handler!!.removeCallbacksAndMessages(null)
             this.handler!!.looper.quit()
@@ -159,6 +182,7 @@ class CarFYTReceiver : CarKeyReceiver {
                     code,
                     1, /* 1 = register, 0 = unregister */
                 )
+                registeredObservations.add(Triple(module, callback, code))
             }
 
             return true
@@ -168,6 +192,12 @@ class CarFYTReceiver : CarKeyReceiver {
             AppLog.i("CarKeyReceiver: Disconnected from FYT Service")
             isBinding = false
             this.toolkit = null
+            // [FIX] The binder is already dead, so these registrations are moot on the remote
+            // side too — drop them so a later disconnect() doesn't attempt no-op IPC calls
+            // against a dead RemoteModule, and so this list can't grow unbounded across repeated
+            // onServiceDisconnected -> automatic onServiceConnected rebind cycles.
+            this.modules.clear()
+            registeredObservations.clear()
         }
 
         private inner class AAPCallback(val moduleCode: Int) :

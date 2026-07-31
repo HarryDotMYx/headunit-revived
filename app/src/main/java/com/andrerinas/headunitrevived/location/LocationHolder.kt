@@ -49,7 +49,13 @@ object LocationHolder {
         }
         val newest = candidates.maxByOrNull { it.time } ?: return null
         val age = System.currentTimeMillis() - newest.time
-        return if (age in 0..maxAgeMs) newest else newest.takeIf { maxAgeMs <= 0 }
+        // [FIX] `age in 0..maxAgeMs` rejected a fix as "stale" whenever age was negative — i.e.
+        // the fix's timestamp is ahead of the device clock. That's a very common state on a head
+        // unit whose RTC battery has died: it boots with a wildly wrong clock until NTP syncs,
+        // during which every incoming (correctly-timestamped) GPS fix looks like it's from the
+        // future and got treated as unavailable. A fix from the future isn't stale by any
+        // reasonable definition of staleness, so only the upper bound should reject it.
+        return if (maxAgeMs <= 0 || age <= maxAgeMs) newest else null
     }
 
     /**

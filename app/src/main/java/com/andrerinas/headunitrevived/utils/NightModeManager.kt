@@ -36,6 +36,7 @@ class NightModeManager(
     private var isSensorRegistered = false
     private var isObserverRegistered = false
     private var isCarSignalObserverRegistered = false
+    private var loggedMissingLightSensor = false
     
     private val handler = Handler(Looper.getMainLooper())
 
@@ -87,9 +88,15 @@ class NightModeManager(
         }
         
         ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
-        
+
         // Initial setup of sensors/observers based on current settings
         refreshListeners()
+
+        // [FIX] Never reset after the first construction, so a stop()/start() cycle (e.g. mode
+        // toggled off and back on) left this false from a previous run — the first sensor
+        // reading after restart went through the normal 2s debounce instead of firing
+        // immediately like a genuine first reading should.
+        isFirstSensorReading = true
 
         // Initial update immediately
         // Reset lastEmittedValue to ensure initial state is sent
@@ -131,6 +138,13 @@ class NightModeManager(
             if (!isSensorRegistered && lightSensor != null) {
                 sensorManager.registerListener(this, lightSensor, SensorManager.SENSOR_DELAY_NORMAL)
                 isSensorRegistered = true
+            } else if (lightSensor == null && !loggedMissingLightSensor) {
+                // [FIX] Previously silent: currentLux stays -1 forever on a device with no
+                // ambient light sensor, so update()'s LIGHT_SENSOR branch never assigns isNight
+                // and it's permanently stuck at its false default — day mode forever, with
+                // nothing in the logs to explain why.
+                loggedMissingLightSensor = true
+                AppLog.w("NightModeManager: LIGHT_SENSOR mode is selected but this device reports no ambient light sensor — day/night will stay fixed instead of reacting to light.")
             }
         } else {
             if (isSensorRegistered) {
@@ -255,6 +269,14 @@ class NightModeManager(
         } else {
             // Immediate update
             handler.removeCallbacks(debounceRunnable) // Cancel any pending debounce
+            // [FIX] This path used to leave pendingValue untouched. If a debounced update() had
+            // already set pendingValue to some target X (schedule pending), and then an immediate
+            // update computed a *different* value Y and emitted it, pendingValue was still X. A
+            // later debounced update() that again computed X would then see
+            // `pendingValue != isNight` as false and skip re-scheduling entirely — permanently
+            // wedging the debounced path even though the last actually emitted value was Y, not
+            // X. Keep pendingValue in sync with whatever this path just decided.
+            pendingValue = isNight
             if (lastEmittedValue != isNight) {
                 lastEmittedValue = isNight
                 onUpdate(isNight)

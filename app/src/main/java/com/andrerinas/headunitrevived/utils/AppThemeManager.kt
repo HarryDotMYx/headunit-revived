@@ -35,6 +35,7 @@ class AppThemeManager(
     private var isSensorRegistered = false
     private var isObserverRegistered = false
     private var isCarSignalObserverRegistered = false
+    private var loggedMissingLightSensor = false
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -86,6 +87,11 @@ class AppThemeManager(
 
         refreshListeners()
 
+        // [FIX] see NightModeManager.start() for the identical reasoning — without this, a
+        // stop()/start() cycle left the first post-restart sensor reading going through the 2s
+        // debounce instead of firing immediately.
+        isFirstSensorReading = true
+
         lastEmittedNight = null
         update(debounce = false)
     }
@@ -114,6 +120,12 @@ class AppThemeManager(
             if (!isSensorRegistered && lightSensor != null) {
                 sensorManager.registerListener(this, lightSensor, SensorManager.SENSOR_DELAY_NORMAL)
                 isSensorRegistered = true
+            } else if (lightSensor == null && !loggedMissingLightSensor) {
+                // [FIX] see NightModeManager.refreshListeners() — without this, a device with no
+                // ambient light sensor stays on the AppTheme.LIGHT_SENSOR default (day) forever,
+                // silently.
+                loggedMissingLightSensor = true
+                AppLog.w("AppThemeManager: LIGHT_SENSOR theme is selected but this device reports no ambient light sensor — theme will stay fixed instead of reacting to light.")
             }
         } else {
             if (isSensorRegistered) {
@@ -245,6 +257,11 @@ class AppThemeManager(
             }
         } else {
             handler.removeCallbacks(debounceRunnable)
+            // [FIX] see NightModeManager.update() for the identical wedge bug this fixes: without
+            // syncing pendingValue here too, a later debounced update() computing the same value
+            // an earlier *pending-but-superseded* debounce had targeted would silently skip
+            // re-scheduling, even though that value was never actually emitted.
+            pendingValue = isNight
             if (lastEmittedNight != isNight) {
                 lastEmittedNight = isNight
                 applyNightMode(isNight)

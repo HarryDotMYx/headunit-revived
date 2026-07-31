@@ -29,6 +29,7 @@ import com.andrerinas.headunitrevived.aap.protocol.messages.TouchEvent
 import com.andrerinas.headunitrevived.aap.protocol.messages.VideoFocusEvent
 import com.andrerinas.headunitrevived.app.SurfaceActivity
 import com.andrerinas.headunitrevived.connection.CommManager
+import com.andrerinas.headunitrevived.connection.carkey.CarKeyReceiver
 import com.andrerinas.headunitrevived.contract.KeyIntent
 import kotlinx.coroutines.launch
 import com.andrerinas.headunitrevived.decoder.SoftwareYuvFrameSink
@@ -1353,6 +1354,16 @@ class AapProjectionActivity : SurfaceActivity(), IProjectionView.Callbacks, Vide
 
     private fun onKeyEvent(keyCode: Int, isPress: Boolean) {
         // Broadcasts (e.g. from CarKeyReceiver) still use this path.
+        // [FIX] CarKeyReceiver.handleKey() sends the KeyIntent.action broadcast this method is
+        // fed from unconditionally (it doubles as KeymapFragment's key-learning channel), so an
+        // arbitrary keycode injected via CarKeyBroadcastReceiver's exported, unprotected OEM
+        // actions reached here — and from here straight into the live session — completely
+        // bypassing CarKeyReceiver's own sendKey() gate on the same keycode. Apply the identical
+        // allowlist/denylist check at this second entry point into the live session.
+        if (!CarKeyReceiver.isKeyCodeAllowed(this, keyCode)) {
+            AppLog.w("AapProjectionActivity: Not forwarding unrecognized/unsafe raw keycode=$keyCode to the active session")
+            return
+        }
         commManager.sendKey(keyCode, isPress)
     }
 

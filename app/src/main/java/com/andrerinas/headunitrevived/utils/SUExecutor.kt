@@ -12,6 +12,11 @@ import com.andrerinas.headunitrevived.IShizuku
 import com.topjohnwu.superuser.Shell
 import rikka.shizuku.Shizuku
 
+// Conservative allowlist charset for setProp's key/value: covers real Android property
+// keys/values (dotted namespaces, versions, paths, flags) while excluding every shell
+// metacharacter (;|&`$(){}<>'"\ and whitespace) that would matter to `sh -c`.
+private val SAFE_PROP_TOKEN = Regex("^[A-Za-z0-9_.:,/=+@-]+$")
+
 class SUExecutor {
 
     private val all: Collection<SUImplementation> = buildList {
@@ -84,8 +89,23 @@ class SUExecutor {
             return false
         }
 
+        // [FIX] key/value were interpolated directly into a shell command string run via
+        // `sh -c` (see RootImpl/ShizukuImpl#runShell). Not currently reachable with
+        // attacker-controlled data — every call site today passes a hardcoded literal — but the
+        // API shape was an injection template waiting for a future caller to pass through
+        // untrusted input. Reject anything outside a safe property key/value charset rather than
+        // relying on every future caller to remember to sanitize.
+        if (!isSafePropToken(key) || !isSafePropToken(value)) {
+            Log.w("SUExecutor", "#setProp rejected: key/value contains disallowed characters")
+            return false
+        }
+
         val exitCode = active?.runShell("setprop $key $value") ?: -1
         return exitCode == 0
+    }
+
+    private fun isSafePropToken(token: String): Boolean {
+        return token.isNotEmpty() && SAFE_PROP_TOKEN.matches(token)
     }
 
     private fun testRegistered() {
@@ -169,6 +189,11 @@ class SUExecutor {
             try {
                 Shizuku.removeRequestPermissionResultListener(this)
             } catch (e: Throwable) { }
+            // [FIX] register()/checkPermission() can bind the privileged user-service connection,
+            // but nothing here ever unbound it — the privileged Shizuku process stayed bound (and
+            // running) for the app's entire process lifetime even after this SUExecutor itself
+            // was unregistered (e.g. AapService stopping). unbind() already no-ops if not bound.
+            this.connection.unbind()
         }
 
         override fun checkPermission(): Boolean {
@@ -210,7 +235,29 @@ class SUExecutor {
         private class PrivilegedService : IShizuku.Stub() {
 
             override fun execShell(command: String): Int {
-                return Runtime.getRuntime().exec(arrayOf("sh", "-c", command)).waitFor()
+                val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+                // [FIX] Nothing drained stdout/stderr before waitFor(). A command whose output
+                // fills the OS pipe buffer (commonly 64KB) before exiting would block on write(),
+                // and this waitFor() would then block forever too — a permanent deadlock of the
+                // privileged Shizuku user-service process, plus leaked stream fds on any command
+                // that produced output. Drain both concurrently while waiting.
+                val stdout = Thread { drainStream(process.inputStream) }.apply { start() }
+                val stderr = Thread { drainStream(process.errorStream) }.apply { start() }
+                val exitCode = process.waitFor()
+                stdout.join()
+                stderr.join()
+                return exitCode
+            }
+
+            private fun drainStream(stream: java.io.InputStream) {
+                try {
+                    val buffer = ByteArray(4096)
+                    while (stream.read(buffer) != -1) { /* discard */ }
+                } catch (e: Exception) {
+                    // Process/pipe already closed — nothing more to drain.
+                } finally {
+                    try { stream.close() } catch (e: Exception) { }
+                }
             }
         }
 

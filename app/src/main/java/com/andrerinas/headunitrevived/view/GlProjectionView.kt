@@ -348,6 +348,19 @@ class GlProjectionView(context: Context) : GLSurfaceView(context), IProjectionVi
                     completed.await()
                 }
                 accepted[0]
+            } catch (e: InterruptedException) {
+                // [FIX] This calling (decode) thread was interrupted while blocked waiting for
+                // the GL thread's queued upload — typically the decoder being torn down
+                // concurrently on disconnect. Falling through to the generic catch below used to
+                // return false here, and the caller (renderYuv420Frame) then fell back to
+                // queueYuv420Frame(), which synchronously reads these same ySource/uSource/vSource
+                // buffers again on *this* thread via copyPlane() — buffers backed by a native
+                // AVFrame that may already be unref'd by the concurrent teardown. Treat this as
+                // "handled" (true) instead, so the caller does NOT touch the buffers again, and
+                // restore the interrupt flag so whatever loop owns this thread still sees it and
+                // unwinds instead of continuing as if nothing happened.
+                Thread.currentThread().interrupt()
+                true
             } catch (e: Exception) {
                 AppLog.w("GlProjectionView: direct YUV upload unavailable: ${e.message}")
                 false

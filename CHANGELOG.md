@@ -1,4 +1,5 @@
 # Changelog
+### v.3.2.1-beta1
 ### v.3.2.0-beta3
 - Fixed: USB connecting inconsistently on first plug-in ("works sometimes, not others") - the accessory-mode switch could silently lose the connect event if the phone re-enumerated at just the wrong moment, with no automatic retry
 - Fixed: USB auto-reconnect after a dropped/failed connection wasn't actually running when a wireless mode was also enabled (the default setup)
@@ -55,6 +56,16 @@
 - Various smaller fixes: a navigation ETA data-type mismatch, a couple of latent crash risks, and a USB compatibility-mode setting not applying during locked boot
 - Fixed: on some head units (especially Chinese MediaTek units), plugging in USB could silently fail to auto-detect - the system doesn't always reliably notify the app when the phone re-enumerates in accessory mode after the switch; the app now proactively ensures its background service is running before switching, instead of depending on that notification
 - Fixed: a device whose H.265 hardware decoder is present but broken could get stuck on "Android Auto is starting" forever with no way to recover; the app now automatically falls back to H.264 and reconnects if no video arrives after 20 seconds
+- Fixed: steering-wheel/hardware key broadcasts could inject unrecognized or unsafe key codes into the active session; now checked against your learned key mappings plus a small safe set, same as the existing media-button protection
+- Fixed: a malformed broadcast extra from another app could crash the app via the steering-wheel/media-key receivers
+- Fixed: FYT head unit steering-wheel button presses could duplicate or multiply over a long drive after the vendor service reconnected, since old callback registrations were never cleaned up
+- Fixed: "Headunit Hotspot" strategy could silently never actually turn the hotspot on for privileged/system-signed builds - the network name/password got configured but the access point itself was never started
+- Fixed: the hotspot's own network name could get overwritten with your phone auto-start SSID instead of its own
+- Fixed a few more hotspot reliability issues: disabling could report success without doing anything, Wi-Fi could be left off with no hotspot if every start attempt failed, and rapid mode switching could leave a hotspot and Wi-Fi Direct running at the same time
+- Fixed: night mode / app theme (light sensor and screen-brightness modes) could get stuck on the wrong state for the rest of a drive after certain update timing
+- Fixed: a fresh GPS fix could be wrongly treated as stale on a head unit whose clock hasn't synced yet (e.g. after a dead RTC battery)
+- Fixed a rare crash risk in the bundled software H.265 decoder's buffer handling and its GPU upload path during disconnect
+- Security: further hardened native USB parsing and root/Shizuku shell-command handling against malformed/untrusted input
 
 ### v.3.2.0-beta2
 - Don't grab audio focus on connect in dynamic mode, thanks to @bnayahu

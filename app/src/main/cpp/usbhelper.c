@@ -74,6 +74,13 @@ Java_com_andrerinas_headunitrevived_connection_UsbNative_nativeWrite(JNIEnv *env
         LOGE("nativeWrite: handle is NULL");
         return -1;
     }
+    // [FIX] endpoint is silently narrowed to unsigned char below (correct for a real USB
+    // endpoint address, which is always a single byte) — reject anything outside that range up
+    // front instead of silently wrapping a corrupt/out-of-range value.
+    if (endpoint < 0 || endpoint > 0xFF) {
+        LOGE("nativeWrite: invalid endpoint value %d", endpoint);
+        return -4;
+    }
     jsize array_len = (*env)->GetArrayLength(env, data);
     if (length > array_len) {
         length = array_len;
@@ -101,6 +108,11 @@ Java_com_andrerinas_headunitrevived_connection_UsbNative_nativeRead(JNIEnv *env,
     if (!handle) {
         LOGE("nativeRead: handle is NULL");
         return -1;
+    }
+    // [FIX] see nativeWrite's identical check — endpoint is narrowed to unsigned char below.
+    if (endpoint < 0 || endpoint > 0xFF) {
+        LOGE("nativeRead: invalid endpoint value %d", endpoint);
+        return -4;
     }
     void *buffer = (*env)->GetDirectBufferAddress(env, jbuf);
     if (!buffer) {
@@ -155,11 +167,15 @@ Java_com_andrerinas_headunitrevived_connection_UsbNative_accModeSwitch(JNIEnv *e
     libusb_device_handle *handle = (libusb_device_handle *)handle_ptr;
     if (!handle) return -1;
     
-    unsigned char protocol_bytes[2];
+    // [FIX] protocol_bytes was left uninitialized and only `r < 0` was checked — a short
+    // (0 or 1 byte) control transfer response left one or both bytes as stack garbage, which
+    // then flowed into `protocol` and the protocol-support decision below. Zero-init as a
+    // defensive baseline and require a full 2-byte response.
+    unsigned char protocol_bytes[2] = {0, 0};
     int r = libusb_control_transfer(handle, 0xC0, 51, 0, 0, protocol_bytes, 2, 1000);
-    if (r < 0) {
+    if (r < 2) {
         LOGE("accModeSwitch: Failed to get protocol version: %d", r);
-        return r;
+        return r < 0 ? r : -1;
     }
     int protocol = (protocol_bytes[1] << 8) | protocol_bytes[0];
     LOGI("accModeSwitch: Protocol version is %d", protocol);

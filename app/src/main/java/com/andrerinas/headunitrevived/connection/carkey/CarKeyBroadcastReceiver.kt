@@ -71,11 +71,21 @@ class CarKeyBroadcastReceiver : BroadcastReceiver(), CarKeyReceiver {
         AppLog.i("CarKeyReceiver: Handling intent action: $action")
 
         // Broadcast for KeymapFragment debugger (raw intent data)
-        context.sendBroadcast(Intent("com.andrerinas.headunitrevived.DEBUG_KEY").apply {
-            setPackage(context.packageName)
-            putExtra("action", action)
-            intent.extras?.let { putExtras(it) }
-        })
+        // [FIX] This receiver is RECEIVER_EXPORTED with no permission for 17 unprotected
+        // actions, so intent.extras can carry a Parcelable extra of a class that doesn't exist
+        // in our classloader — putExtras() forces an eager unparcel and throws
+        // BadParcelableException on API <= 33, uncaught, crashing this process (and the live AA
+        // session with it) from a zero-permission app with no user interaction. This is a
+        // best-effort debug broadcast; skip it on failure rather than let it take down onReceive.
+        try {
+            context.sendBroadcast(Intent("com.andrerinas.headunitrevived.DEBUG_KEY").apply {
+                setPackage(context.packageName)
+                putExtra("action", action)
+                intent.extras?.let { putExtras(it) }
+            })
+        } catch (e: Exception) {
+            AppLog.w("CarKeyReceiver: Failed to relay debug broadcast: ${e.message}")
+        }
 
         // Try to abort broadcast to prevent other apps (like built-in radio) from reacting
         if (isOrderedBroadcast) {

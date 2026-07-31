@@ -1633,10 +1633,8 @@ class AapService : Service(), UsbReceiver.Listener {
             wifiDirectManager?.stop()
         } else {
             // This chipset can't run SoftAP and WiFi Direct concurrently — make sure hotspot is off before P2P starts.
-            Thread {
-                AppLog.i("AapService: Mode requires WiFi Direct — ensuring hotspot is disabled first...")
-                HotspotManager.setHotspotEnabled(this, false)
-            }.start()
+            AppLog.i("AapService: Mode requires WiFi Direct — ensuring hotspot is disabled first...")
+            HotspotManager.setHotspotEnabledAsync(this, false)
         }
 
         // Mode 1: Auto (Headunit Server), Mode 2: Helper (Wireless Launcher), Mode 3: Native AA
@@ -1667,10 +1665,8 @@ class AapService : Service(), UsbReceiver.Listener {
 
                 // Hotspot logic for Helper mode if enabled (only for Strategy 4: Headunit Hotspot)
                 if (settings.autoEnableHotspot && strategy == 4) {
-                    Thread {
-                        AppLog.i("AapService: Auto-enabling hotspot for Helper mode...")
-                        HotspotManager.setHotspotEnabled(this, true)
-                    }.start()
+                    AppLog.i("AapService: Auto-enabling hotspot for Helper mode...")
+                    HotspotManager.setHotspotEnabledAsync(this, true)
                 }
             }
 
@@ -1775,7 +1771,9 @@ class AapService : Service(), UsbReceiver.Listener {
 
         if (App.provide(this).settings.autoEnableHotspot) {
             AppLog.i("AapService: Auto-disabling hotspot...")
-            HotspotManager.setHotspotEnabled(this, false)
+            // [FIX] Was a direct synchronous call — onDestroy() runs on the main thread, and
+            // setHotspotEnabled() can block 500ms+ (WiFi radio settle + reflection/IPC calls).
+            HotspotManager.setHotspotEnabledAsync(this, false)
         }
 
         wifiReadyTimeoutJob?.cancel()
