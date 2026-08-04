@@ -63,9 +63,9 @@ adb shell am start -a android.intent.action.VIEW -d "headunit://connect?ip=192.1
 - more customization options for the UI and the app itself
 
 ## Changelog
-### v.3.2.1-beta1
+### v.3.2.1
 - Settings and Onboarding Wizard redesign for better usability, thanks to @andrecuellar
-- Fixing multiple WiFi-Direct and Native AA connection issues, thanks to @o-jcardenass, @andrecuellar and @notathf
+- Fixing multiple WiFi-Direct and Native AA connection issues, thanks to 
 - Fixed: a device whose H.265 hardware decoder is present but broken could get stuck on "Android Auto is starting" forever with no way to recover; the app now automatically falls back to H.264 and reconnects if no video arrives after 20 seconds
 - Fixed: steering-wheel/hardware key broadcasts could inject unrecognized or unsafe key codes into the active session; now checked against your learned key mappings plus a small safe set, same as the existing media-button protection
 - Fixed: a malformed broadcast extra from another app could crash the app via the steering-wheel/media-key receivers
