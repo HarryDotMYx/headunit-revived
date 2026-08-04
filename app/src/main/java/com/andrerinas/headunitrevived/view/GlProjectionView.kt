@@ -79,6 +79,22 @@ class GlProjectionView(context: Context) : GLSurfaceView(context), IProjectionVi
         vPlane: ByteBuffer,
         vStride: Int
     ): Boolean {
+        // Validate once, up front, for both paths below. renderYuv420FrameDirect() already
+        // rejects bad stride/capacity combinations before touching GL (see its own checks) —
+        // but that rejection is exactly what routes the caller into queueYuv420Frame() ->
+        // copyPlane(), which has no such checks and derives buffer positions/limits directly
+        // from the given stride, throwing IllegalArgumentException on the network/decode
+        // thread for the same malformed input the direct path exists to catch.
+        if (width <= 0 || height <= 0) return false
+        val chromaWidth = width / 2
+        val chromaHeight = height / 2
+        if (yStride < width || uStride < chromaWidth || vStride < chromaWidth ||
+            yPlane.capacity() < yStride * height ||
+            uPlane.capacity() < uStride * chromaHeight ||
+            vPlane.capacity() < vStride * chromaHeight) {
+            AppLog.w("GlProjectionView: dropping malformed YUV420 frame ${width}x$height strides=$yStride/$uStride/$vStride")
+            return true
+        }
         if (renderer.renderYuv420FrameDirect(width, height, yPlane, yStride, uPlane, uStride, vPlane, vStride)) {
             return true
         }
@@ -345,7 +361,22 @@ class GlProjectionView(context: Context) : GLSurfaceView(context), IProjectionVi
                     if (state.compareAndSet(directPending, directCancelled)) {
                         return false
                     }
-                    completed.await()
+                    // The GL thread already flipped to directRunning (it owns the source
+                    // buffers now via its ySource/uSource/vSource duplicates), so the CAS above
+                    // failed and we can no longer cancel — the buffers must not be touched again
+                    // here or by a fallback. This call runs on the decode thread while holding
+                    // VideoDecoder's own lock (see decode()'s synchronized block), so an
+                    // unbounded wait here used to be able to block that lock indefinitely if the
+                    // GL thread was ever wedged — and any other thread calling
+                    // VideoDecoder.stop()/setSurface() (e.g. the main thread tearing down on
+                    // disconnect) would then hang too, an ANR risk. Wait a further bounded period;
+                    // if the GL thread still hasn't finished, treat it the same as the
+                    // InterruptedException case below — "handled", so the caller never re-reads
+                    // the buffers — and let the upload finish or fail on its own in the background.
+                    if (!completed.await(directUploadTimeoutMs * 4, TimeUnit.MILLISECONDS)) {
+                        AppLog.w("GlProjectionView: GL thread still busy after extended wait; abandoning wait (upload continues in background)")
+                        return true
+                    }
                 }
                 accepted[0]
             } catch (e: InterruptedException) {
@@ -439,6 +470,13 @@ class GlProjectionView(context: Context) : GLSurfaceView(context), IProjectionVi
             vTextureScaleX = chromaWidth.toFloat() / vStride.toFloat()
             hasYuvFrame = true
             pendingYuvFrame = false
+            // The pendingYuvFrame branch in drawYuvFrame() is the only other caller of
+            // markFrameDrawn() for the YUV path, and this upload already cleared
+            // pendingYuvFrame above so that branch never runs for a directly-uploaded frame.
+            // Without this, lastFrameDrawnMs never advances on this (perfectly healthy) path,
+            // and the display-stall watchdog in AapProjectionActivity sees "no frame ever
+            // drawn" and repeatedly tears down and rebuilds the decoder/view.
+            markFrameDrawn()
 
             if (!loggedFirstDirectYuvFrame) {
                 loggedFirstDirectYuvFrame = true
@@ -459,7 +497,24 @@ class GlProjectionView(context: Context) : GLSurfaceView(context), IProjectionVi
 
         override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
             AppLog.i("GlProjectionView: onSurfaceCreated (GL Context)")
-            
+
+            // The EGL context (and every texture name in it) can be recreated here even though
+            // this Kotlin object survives — e.g. the system reclaims it under memory pressure
+            // despite preserveEGLContextOnPause, or the surface is torn down/rebuilt. The new
+            // context hands out fresh (often identically-numbered) texture names via
+            // glGenTextures below, which have never had glTexImage2D called on them. Without
+            // resetting this state, uploadYuvPlane() would see a "known" size in
+            // uploadedPlaneWidths/Heights and take the glTexSubImage2D branch on a texture with
+            // no storage yet — GL_INVALID_OPERATION, nothing uploaded, permanent black/garbage
+            // picture. Also drop any leftover YUV frame flags so the first frame after a context
+            // rebuild always goes through a full glTexImage2D upload.
+            synchronized(this) {
+                uploadedPlaneWidths.fill(0)
+                uploadedPlaneHeights.fill(0)
+                hasYuvFrame = false
+                pendingYuvFrame = false
+            }
+
             // Setup texture
             val textures = IntArray(1)
             GLES20.glGenTextures(1, textures, 0)
@@ -691,6 +746,12 @@ class GlProjectionView(context: Context) : GLSurfaceView(context), IProjectionVi
         override fun onFrameAvailable(surfaceTexture: SurfaceTexture?) {
             synchronized(this) {
                 updateSurface = true
+                // A frame arrived on the external-OES surface (MediaCodec hardware path), so
+                // that's the content to show now. Without clearing this, once any YUV frame had
+                // been drawn (e.g. from the bundled software HEVC decoder), onDrawFrame's
+                // `if (shouldDrawYuv)` check would keep short-circuiting to the stale YUV path
+                // forever and this new OES frame would never actually be drawn.
+                hasYuvFrame = false
             }
             requestRender()
         }

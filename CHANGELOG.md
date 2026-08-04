@@ -1,5 +1,30 @@
 # Changelog
-### v.3.2.1-beta1
+### v.3.2.1
+- Settings and Onboarding Wizard redesign for better usability, thanks to @andrecuellar
+- Fixing multiple WiFi-Direct and Native AA connection issues, thanks to @o-jcardenass, @andrecuellar and @notathf
+- Fixed: a device whose H.265 hardware decoder is present but broken could get stuck on "Android Auto is starting" forever with no way to recover; the app now automatically falls back to H.264 and reconnects if no video arrives after 20 seconds
+- Fixed: steering-wheel/hardware key broadcasts could inject unrecognized or unsafe key codes into the active session; now checked against your learned key mappings plus a small safe set, same as the existing media-button protection
+- Fixed: a malformed broadcast extra from another app could crash the app via the steering-wheel/media-key receivers
+- Fixed: FYT head unit steering-wheel button presses could duplicate or multiply over a long drive after the vendor service reconnected, since old callback registrations were never cleaned up
+- Fixed: "Headunit Hotspot" strategy could silently never actually turn the hotspot on for privileged/system-signed builds - the network name/password got configured but the access point itself was never started
+- Fixed: the hotspot's own network name could get overwritten with your phone auto-start SSID instead of its own
+- Fixed a few more hotspot reliability issues: disabling could report success without doing anything, Wi-Fi could be left off with no hotspot if every start attempt failed, and rapid mode switching could leave a hotspot and Wi-Fi Direct running at the same time
+- Fixed: night mode / app theme (light sensor and screen-brightness modes) could get stuck on the wrong state for the rest of a drive after certain update timing
+- Fixed: a fresh GPS fix could be wrongly treated as stale on a head unit whose clock hasn't synced yet (e.g. after a dead RTC battery)
+- Fixed a rare crash risk in the bundled software H.265 decoder's buffer handling and its GPU upload path during disconnect
+- Security: further hardened native USB parsing and root/Shizuku shell-command handling against malformed/untrusted input
+- Fixed: video rendered smaller than the screen (letterboxed) when manually selecting 1080p, 2K, or 4K resolution, while 720p correctly filled the screen - a resolution-cap calculation was comparing against the raw screen size instead of the usable (inset-adjusted) area
+- Fixed: video could intermittently freeze for a moment and self-recover in a repeating cycle shortly after connecting - the GLES renderer's fast-path frame upload (used with the bundled software H.265 decoder) never reported itself as "drawn," so the display-stall watchdog wrongly thought the picture had frozen and kept rebuilding the decoder even while video was playing normally
+- Fixed: automatic recovery from a frozen/stalled display could silently stop working for the rest of a session after any brief, self-recovering disconnect (e.g. a short Wi-Fi hiccup)
+- Fixed: a possible app hang if the display renderer became unresponsive while a video frame was mid-upload
+- Fixed: the bundled software H.265 decoder could get stuck retrying forever on devices where it fails to start, instead of falling back to the normal decoder
+- Fixed: a possible crash from malformed video frame data reaching the GLES renderer's fallback upload path
+- Fixed: video could show a black or garbled picture after the display surface was recreated (e.g. after the screen was off for a while)
+- Fixed: switching decoders mid-session could leave the picture frozen on an old frame from the previous decoder
+- Fixed: a memory leak of the projection screen and its views after exiting Android Auto
+- Fixed: a rare spurious "video focus lost" signal could be sent to the phone right after automatic display recovery rebuilt the screen, interrupting an otherwise-healthy session
+- Fixed: a rare race condition when the video resolution changed mid-session (e.g. phone rotation) that could briefly apply the new width together with the old height
+
 ### v.3.2.0-beta3
 - Fixed: USB connecting inconsistently on first plug-in ("works sometimes, not others") - the accessory-mode switch could silently lose the connect event if the phone re-enumerated at just the wrong moment, with no automatic retry
 - Fixed: USB auto-reconnect after a dropped/failed connection wasn't actually running when a wireless mode was also enabled (the default setup)
@@ -55,17 +80,6 @@
 - Fixed the auto-connect priority list's drag-and-drop breaking or flickering mid-drag
 - Various smaller fixes: a navigation ETA data-type mismatch, a couple of latent crash risks, and a USB compatibility-mode setting not applying during locked boot
 - Fixed: on some head units (especially Chinese MediaTek units), plugging in USB could silently fail to auto-detect - the system doesn't always reliably notify the app when the phone re-enumerates in accessory mode after the switch; the app now proactively ensures its background service is running before switching, instead of depending on that notification
-- Fixed: a device whose H.265 hardware decoder is present but broken could get stuck on "Android Auto is starting" forever with no way to recover; the app now automatically falls back to H.264 and reconnects if no video arrives after 20 seconds
-- Fixed: steering-wheel/hardware key broadcasts could inject unrecognized or unsafe key codes into the active session; now checked against your learned key mappings plus a small safe set, same as the existing media-button protection
-- Fixed: a malformed broadcast extra from another app could crash the app via the steering-wheel/media-key receivers
-- Fixed: FYT head unit steering-wheel button presses could duplicate or multiply over a long drive after the vendor service reconnected, since old callback registrations were never cleaned up
-- Fixed: "Headunit Hotspot" strategy could silently never actually turn the hotspot on for privileged/system-signed builds - the network name/password got configured but the access point itself was never started
-- Fixed: the hotspot's own network name could get overwritten with your phone auto-start SSID instead of its own
-- Fixed a few more hotspot reliability issues: disabling could report success without doing anything, Wi-Fi could be left off with no hotspot if every start attempt failed, and rapid mode switching could leave a hotspot and Wi-Fi Direct running at the same time
-- Fixed: night mode / app theme (light sensor and screen-brightness modes) could get stuck on the wrong state for the rest of a drive after certain update timing
-- Fixed: a fresh GPS fix could be wrongly treated as stale on a head unit whose clock hasn't synced yet (e.g. after a dead RTC battery)
-- Fixed a rare crash risk in the bundled software H.265 decoder's buffer handling and its GPU upload path during disconnect
-- Security: further hardened native USB parsing and root/Shizuku shell-command handling against malformed/untrusted input
 
 ### v.3.2.0-beta2
 - Don't grab audio focus on connect in dynamic mode, thanks to @bnayahu
@@ -80,8 +94,6 @@
 - Add car keys support for FYT headunits, thanks to @MrEAlderson
 - Added Option to flip projection horizontal for Headup-Displays
 - Recover automatically from post-first-frame video display stalls, thanks to @andrecuellar
-- Settings and Onboarding Wizard redesign for better usability, thanks to @andrecuellar
-- Fixing mulitiple WiFi-Direct and Native AA connection issues, thanks to @o-jcardenass, @andrecuellar and @notathf
 
 ### v.3.1.1
 - Reduce pressure on sensor events like night and gps and start/stop these events in onConnected, onDisconnect and onDestroy

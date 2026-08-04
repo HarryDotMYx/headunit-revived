@@ -274,6 +274,15 @@ class AapProjectionActivity : SurfaceActivity(), IProjectionView.Callbacks, Vide
             if (::projectionView.isInitialized) {
                 videoDecoder.softwareYuvFrameSink = null
                 videoDecoder.stop("projectionViewRecreate")
+                // [FIX] GlProjectionView.release() (triggered by removeView -> onDetachedFromWindow)
+                // posts onSurfaceDestroyed to this old view's callback list asynchronously, so it
+                // can still land *after* setupProjectionView() below has already created the new
+                // view and registered this Activity on it. Without removing the callback first,
+                // that stale delivery ran against current state anyway — clearing isSurfaceSet,
+                // sending a spurious VideoFocusEvent(gain=false) to the phone, and stopping the
+                // just-recreated decoder — right in the middle of the display-stall recovery this
+                // rebuild exists to perform.
+                projectionView.removeCallback(this)
                 container.removeView(projectionView as View)
             }
             isSurfaceSet = false
@@ -468,6 +477,17 @@ class AapProjectionActivity : SurfaceActivity(), IProjectionView.Callbacks, Vide
                     when (state) {
                         is CommManager.ConnectionState.Disconnected -> {
                             watchdogHandler.removeCallbacksAndMessages(null)
+                            // [FIX] The wipe above also kills reconnectingWatchdog's pending
+                            // postDelayed chain, and nothing else re-arms it — only onResume()
+                            // does that, once, at activity start. For the "unexpected disconnect,
+                            // wait for recovery" branch below (state.isUserExit/isClean/
+                            // killOnDisconnect all false, so we do NOT finish()), the activity
+                            // keeps running but reconnectingWatchdog — and with it the
+                            // reconnecting-overlay-on-stall and issue #650 display-freeze
+                            // recovery — silently stops forever the moment any transient
+                            // disconnect happens mid-session. Re-arm it unconditionally here; its
+                            // own state checks make repeated/early ticks harmless.
+                            watchdogHandler.postDelayed(reconnectingWatchdog, 2000)
                             if (!state.isClean && !state.isUserExit) {
                                 AppLog.w("AapProjectionActivity: Disconnected unexpectedly.")
                                 Toast.makeText(this@AapProjectionActivity, getString(R.string.wifi_disconnect_toast), Toast.LENGTH_LONG).show()
@@ -1404,6 +1424,13 @@ class AapProjectionActivity : SurfaceActivity(), IProjectionView.Callbacks, Vide
         videoDecoder.onFpsChanged = null
         videoDecoder.softwareYuvFrameSink = null
         videoDecoder.dimensionsListener = null
+        // [FIX] videoDecoder is an app-scoped singleton that outlives this Activity.
+        // onFirstFrameListener (set in onCreate/the Disconnected-recovery branch) captures
+        // `this@AapProjectionActivity` and its loading/reconnecting overlay Views. Left
+        // uncleared, the destroyed Activity and its whole view hierarchy stay reachable until
+        // the next first frame arrives, at which point the captured runOnUiThread callback
+        // fires against an already-dead Activity instance.
+        videoDecoder.onFirstFrameListener = null
     }
 
     companion object {

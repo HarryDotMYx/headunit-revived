@@ -290,7 +290,17 @@ object HeadUnitScreenConfig {
         // min(current, panelCeiling): only ever lowers, so explicit lower choices and HEVC-gated
         // 1440p/4K are never raised.
         val preCapResolution = negotiatedResolutionType
-        val panelCeiling = autoResolutionForPanel(realScreenWidthPx, realScreenHeightPx, isPortraitDisplay, canNegotiateHevc)
+        // Cap against the USABLE area (post-inset), not the raw screen. autoResolutionForPanel
+        // is meant to mirror the AUTO-selection branch above, which already uses screenWidthPx/
+        // screenHeightPx. Passing the raw realScreenWidthPx/realScreenHeightPx here let the cap
+        // sit above what the display can actually show whenever insets are non-zero (nav/status
+        // bars, or manual inset settings) — e.g. a 1280x720 usable panel with a 80px inset reports
+        // a raw 1280x800, which crosses the ">720" cutoff and raises the ceiling to 1920x1080.
+        // A manual 1080p/2K/4K pick then sailed through uncapped, while getScaleX/getScaleY (which
+        // correctly compare against the smaller usable screenWidthPx/screenHeightPx) shrank the
+        // video to fit — the video "gets small" at higher resolutions while 720p, low enough to
+        // clear both thresholds, looked fine.
+        val panelCeiling = autoResolutionForPanel(screenWidthPx, screenHeightPx, isPortraitDisplay, canNegotiateHevc)
         if (pixelsOf(negotiatedResolutionType) > pixelsOf(panelCeiling)) {
             negotiatedResolutionType = panelCeiling
         }

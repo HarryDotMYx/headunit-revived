@@ -162,14 +162,26 @@ class VideoDecoder(private val settings: Settings) {
      */
     private fun handleOutputFormatChange(format: MediaFormat) {
         AppLog.i("Output Format Changed: $format")
-        val newWidth = try { format.getInteger(MediaFormat.KEY_WIDTH) } catch (e: Exception) { mWidth }
-        val newHeight = try { format.getInteger(MediaFormat.KEY_HEIGHT) } catch (e: Exception) { mHeight }
-        if (mWidth != newWidth || mHeight != newHeight) {
-            AppLog.i("Video dimensions changed via format: ${newWidth}x$newHeight")
-            mWidth = newWidth
-            mHeight = newHeight
-            dimensionsListener?.onVideoDimensionsChanged(mWidth, mHeight)
+        // [FIX] mWidth/mHeight are mutated under synchronized(this) everywhere else (decode(),
+        // scanAndApplyConfig(), stop()) but this call — from the output thread, on a mid-stream
+        // renegotiation/rotation — used to write them unsynchronized. A concurrent unsynchronized
+        // read (videoWidth/videoHeight, read from the UI thread e.g. for PiP's aspect Rational)
+        // could then observe a torn combination: the new width with the still-old height, or
+        // vice versa. Compute the change under the lock and dispatch the listener outside it so
+        // it never runs while this decoder's lock is held.
+        val changedDimensions: Pair<Int, Int>? = synchronized(this) {
+            val newWidth = try { format.getInteger(MediaFormat.KEY_WIDTH) } catch (e: Exception) { mWidth }
+            val newHeight = try { format.getInteger(MediaFormat.KEY_HEIGHT) } catch (e: Exception) { mHeight }
+            if (mWidth != newWidth || mHeight != newHeight) {
+                AppLog.i("Video dimensions changed via format: ${newWidth}x$newHeight")
+                mWidth = newWidth
+                mHeight = newHeight
+                Pair(newWidth, newHeight)
+            } else {
+                null
+            }
         }
+        changedDimensions?.let { (w, h) -> dimensionsListener?.onVideoDimensionsChanged(w, h) }
         try {
             codec?.setVideoScalingMode(MediaCodec.VIDEO_SCALING_MODE_SCALE_TO_FIT)
         } catch (e: Exception) {}
@@ -249,6 +261,7 @@ class VideoDecoder(private val settings: Settings) {
                 mWidth = 0
                 mHeight = 0
                 hasParsedRequiredNals = false
+                bundledHevcUnavailable = false
             }
             // Keep VPS/SPS/PPS cached so we can re-inject them on restart
             lastFrameRenderedMs = 0L
@@ -356,9 +369,20 @@ class VideoDecoder(private val settings: Settings) {
         }
     }
 
+    // [FIX] Set when startBundledHevc() fails to actually produce a decoder. Without this,
+    // decode()'s init gate (`codec == null && softwareHevcDecoder == null`) stayed true forever
+    // after a failed start, so shouldUseBundledHevc() kept saying yes and every single
+    // subsequent packet (30-60/s) re-ran the whole failed startup attempt again, with no
+    // fallback to a working decoder — a permanent per-packet retry storm recoverable only via
+    // the 20s "no first frame" H.264 fallback/reconnect in AapProjectionActivity. Once set,
+    // shouldUseBundledHevc() returns false so the next packet takes the normal MediaCodec path
+    // instead.
+    private var bundledHevcUnavailable = false
+
     private fun shouldUseBundledHevc(type: CodecType, forceSoftware: Boolean): Boolean {
         return type == CodecType.H265 &&
                 forceSoftware &&
+                !bundledHevcUnavailable &&
                 settings.softwareVideoDecoder == Settings.SoftwareVideoDecoder.BUNDLED_FFMPEG &&
                 FfmpegHevcDecoder.isAvailable()
     }
@@ -380,6 +404,7 @@ class VideoDecoder(private val settings: Settings) {
             )
             if (!decoder.start()) {
                 AppLog.e("Bundled FFmpeg HEVC decoder is unavailable")
+                bundledHevcUnavailable = true
                 return
             }
             softwareHevcDecoder = decoder
@@ -391,6 +416,7 @@ class VideoDecoder(private val settings: Settings) {
             AppLog.e("Failed to start bundled FFmpeg HEVC decoder", e)
             softwareHevcDecoder = null
             running = false
+            bundledHevcUnavailable = true
         }
     }
 
