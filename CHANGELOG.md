@@ -13,17 +13,19 @@
 - Fixed: a fresh GPS fix could be wrongly treated as stale on a head unit whose clock hasn't synced yet (e.g. after a dead RTC battery)
 - Fixed a rare crash risk in the bundled software H.265 decoder's buffer handling and its GPU upload path during disconnect
 - Security: further hardened native USB parsing and root/Shizuku shell-command handling against malformed/untrusted input
-- Fixed: video rendered smaller than the screen (letterboxed) when manually selecting 1080p, 2K, or 4K resolution, while 720p correctly filled the screen - a resolution-cap calculation was comparing against the raw screen size instead of the usable (inset-adjusted) area
-- Fixed: video could intermittently freeze for a moment and self-recover in a repeating cycle shortly after connecting - the GLES renderer's fast-path frame upload (used with the bundled software H.265 decoder) never reported itself as "drawn," so the display-stall watchdog wrongly thought the picture had frozen and kept rebuilding the decoder even while video was playing normally
-- Fixed: automatic recovery from a frozen/stalled display could silently stop working for the rest of a session after any brief, self-recovering disconnect (e.g. a short Wi-Fi hiccup)
-- Fixed: a possible app hang if the display renderer became unresponsive while a video frame was mid-upload
-- Fixed: the bundled software H.265 decoder could get stuck retrying forever on devices where it fails to start, instead of falling back to the normal decoder
-- Fixed: a possible crash from malformed video frame data reaching the GLES renderer's fallback upload path
-- Fixed: video could show a black or garbled picture after the display surface was recreated (e.g. after the screen was off for a while)
-- Fixed: switching decoders mid-session could leave the picture frozen on an old frame from the previous decoder
-- Fixed: a memory leak of the projection screen and its views after exiting Android Auto
-- Fixed: a rare spurious "video focus lost" signal could be sent to the phone right after automatic display recovery rebuilt the screen, interrupting an otherwise-healthy session
-- Fixed: a rare race condition when the video resolution changed mid-session (e.g. phone rotation) that could briefly apply the new width together with the old height
+- Security: hardened the SSL/TLS handshake layer - set a minimum TLS version floor, rejected an unauthenticated-cipher edge case, fixed a race that could corrupt an in-flight handshake if a connection attempt was cancelled at just the wrong moment, and stopped an unrelated proactive phone message from being able to derail the handshake
+- Fixed: a connection error could get silently mislabeled as an intentional disconnect for the rest of the session after the first real disconnect, hiding genuine connection problems from the logs
+- Fixed: video rendered smaller than the screen (letterboxed) when manually selecting 1080p, 2K, or 4K resolution, while 720p correctly filled the screen - a resolution-cap calculation was comparing against the raw screen size instead of the usable (inset-adjusted) area, thanks to @harrydotmyx
+- Fixed: video could intermittently freeze for a moment and self-recover in a repeating cycle shortly after connecting - the GLES renderer's fast-path frame upload (used with the bundled software H.265 decoder) never reported itself as "drawn," so the display-stall watchdog wrongly thought the picture had frozen and kept rebuilding the decoder even while video was playing normally, thanks to @harrydotmyx
+- Fixed: automatic recovery from a frozen/stalled display could silently stop working for the rest of a session after any brief, self-recovering disconnect (e.g. a short Wi-Fi hiccup), thanks to @harrydotmyx
+- Fixed: a possible app hang if the display renderer became unresponsive while a video frame was mid-upload, thanks to @harrydotmyx
+- Fixed: the bundled software H.265 decoder could get stuck retrying forever on devices where it fails to start, instead of falling back to the normal decoder, thanks to @harrydotmyx
+- Fixed: a possible crash from malformed video frame data reaching the GLES renderer's fallback upload path, thanks to @harrydotmyx
+- Fixed: video could show a black or garbled picture after the display surface was recreated (e.g. after the screen was off for a while), thanks to @harrydotmyx
+- Fixed: switching decoders mid-session could leave the picture frozen on an old frame from the previous decoder, thanks to @harrydotmyx
+- Fixed: a memory leak of the projection screen and its views after exiting Android Auto, thanks to @harrydotmyx
+- Fixed: a rare spurious "video focus lost" signal could be sent to the phone right after automatic display recovery rebuilt the screen, interrupting an otherwise-healthy session, thanks to @harrydotmyx
+- Fixed: a rare race condition when the video resolution changed mid-session (e.g. phone rotation) that could briefly apply the new width together with the old height, thanks to @harrydotmyx
 
 ### v.3.2.0-beta3
 - Fixed: USB connecting inconsistently on first plug-in ("works sometimes, not others") - the accessory-mode switch could silently lose the connect event if the phone re-enumerated at just the wrong moment, with no automatic retry

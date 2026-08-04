@@ -44,7 +44,7 @@ import javax.net.ssl.SSLEngineResult
  * @param audioDecoder Decodes PCM audio received from the phone.
  * @param videoDecoder Decodes H.264/H.265 video received from the phone.
  * @param audioManager Used to request and release audio focus.
- * @param settings User preferences (SSL mode, key mappings, microphone sample rate, …).
+ * @param settings User preferences (key mappings, microphone sample rate, …).
  * @param notification Background notification handle; updated as connection state changes.
  * @param context Application context; used for broadcasts and system services.
  * @param onAaMediaMetadata Optional callback when the phone sends media metadata (now-playing).
